@@ -31,8 +31,7 @@ use actix_web::{
     pred::Predicate,
     server, App, FromRequest, HttpRequest, HttpResponse, Path, Request,
 };
-use crypto;
-use hcore::{env as henv, service::ServiceGroup};
+use hcore::{crypto, env as henv, service::ServiceGroup};
 use protocol::socket_addr_env_or_default;
 use rustls::ServerConfig;
 use serde_json::{self, Value as Json};
@@ -188,12 +187,7 @@ impl Middleware<AppState> for Authentication {
         let hdr_components: Vec<&str> = hdr.split_whitespace().collect();
 
         match hdr_components.as_slice() {
-            ["Bearer", incoming_token]
-                if crypto::util::fixed_time_eq(
-                    current_token.as_bytes(),
-                    incoming_token.as_bytes(),
-                ) =>
-            {
+            ["Bearer", incoming_token] if crypto::secure_eq(current_token, incoming_token) => {
                 Ok(Started::Done)
             }
             _ => Ok(Started::Response(HttpResponse::Unauthorized().finish())),
