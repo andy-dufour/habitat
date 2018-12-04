@@ -48,6 +48,7 @@ libc = "*"
 log = "*"
 notify = "*"
 num_cpus = "*"
+prometheus = "*"
 prost = "*"
 protobuf = { version = "1.5.1", features = ["bytes"] }
 rand = "*"

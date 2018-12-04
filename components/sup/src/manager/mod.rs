@@ -59,6 +59,7 @@ use hcore::package::metadata::PackageType;
 use hcore::package::{Identifiable, PackageIdent, PackageInstall, PackageTarget};
 use hcore::service::ServiceGroup;
 use launcher_client::{LauncherCli, LAUNCHER_LOCK_CLEAN_ENV, LAUNCHER_PID_ENV};
+use prometheus::Counter;
 use protocol;
 use protocol::net::{self, ErrCode, NetResult};
 use rustls::{internal::pemfile, NoClientAuth, ServerConfig};
@@ -94,6 +95,14 @@ const MEMBER_ID_FILE: &'static str = "MEMBER_ID";
 const PROC_LOCK_FILE: &'static str = "LOCK";
 
 static LOGKEY: &'static str = "MR";
+
+lazy_static! {
+    static ref SVC_LOAD_COUNTER: Counter = register_counter!(opts!(
+        "svc_load_total",
+        "Total number of 'hab svc load' commands run",
+        labels!{"handler" => "all",}
+    )).unwrap();
+}
 
 /// FileSystem paths that the Manager uses to persist data to disk.
 ///
@@ -1073,6 +1082,7 @@ impl Manager {
         req: &mut CtlRequest,
         opts: protocol::ctl::SvcLoad,
     ) -> NetResult<()> {
+        SVC_LOAD_COUNTER.inc();
         let ident: PackageIdent = opts.ident.clone().ok_or(err_update_client())?.into();
         let bldr_url = opts
             .bldr_url

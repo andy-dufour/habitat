@@ -33,6 +33,7 @@ use actix_web::{
 };
 use crypto;
 use hcore::{env as henv, service::ServiceGroup};
+use prometheus::{self, Encoder, TextEncoder};
 use protocol::socket_addr_env_or_default;
 use rustls::ServerConfig;
 use serde_json::{self, Value as Json};
@@ -295,6 +296,7 @@ fn routes(app: App<AppState>) -> App<AppState> {
             r.get().f(health_with_org)
         }).resource("/butterfly", |r| r.get().filter(RedactHTTP).f(butterfly))
         .resource("/census", |r| r.get().filter(RedactHTTP).f(census))
+        .resource("/metrics", |r| r.get().f(metrics))
 }
 
 fn json_response(data: String) -> HttpResponse {
@@ -462,6 +464,18 @@ fn service(
         Some(s) => HttpResponse::Ok().json(s),
         None => HttpResponse::NotFound().finish(),
     }
+}
+
+fn metrics(_req: &HttpRequest<AppState>) -> HttpResponse {
+    let encoder = TextEncoder::new();
+    let metric_families = prometheus::gather();
+    let mut buffer = vec![];
+
+    // JB TODO: handle both of these unwraps
+    encoder.encode(&metric_families, &mut buffer).unwrap();
+    HttpResponse::Ok()
+        .content_type(encoder.format_type())
+        .body(String::from_utf8(buffer).unwrap())
 }
 
 fn doc(_req: &HttpRequest<AppState>) -> HttpResponse {
