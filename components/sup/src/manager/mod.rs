@@ -59,7 +59,7 @@ use hcore::package::metadata::PackageType;
 use hcore::package::{Identifiable, PackageIdent, PackageInstall, PackageTarget};
 use hcore::service::ServiceGroup;
 use launcher_client::{LauncherCli, LAUNCHER_LOCK_CLEAN_ENV, LAUNCHER_PID_ENV};
-use prometheus::Counter;
+use prometheus::{Counter, HistogramVec};
 use protocol;
 use protocol::net::{self, ErrCode, NetResult};
 use rustls::{internal::pemfile, NoClientAuth, ServerConfig};
@@ -96,13 +96,11 @@ const PROC_LOCK_FILE: &'static str = "LOCK";
 
 static LOGKEY: &'static str = "MR";
 
-lazy_static! {
-    static ref SVC_LOAD_COUNTER: Counter = register_counter!(opts!(
-        "svc_load_total",
-        "Total number of 'hab svc load' commands run",
-        labels!{"handler" => "all",}
-    )).unwrap();
-}
+// In the interest of keeping the size of this file from sprawling to thousands of lines just to
+// list metrics out, I've opted to include the definitions of said metrics in a separate file and
+// include it here. The docs say using this macro is a bad idea, and while I agree with that
+// sentiment generally, this seems like a legit use case.
+include!("../metrics/svc.rs");
 
 /// FileSystem paths that the Manager uses to persist data to disk.
 ///
@@ -285,6 +283,10 @@ impl Manager {
         req: &mut CtlRequest,
         opts: protocol::ctl::SvcStatus,
     ) -> NetResult<()> {
+        SVC_STATUS_COUNTER.inc();
+        let timer = SVC_STATUS_HISTOGRAM
+            .with_label_values(&["svc_status"])
+            .start_timer();
         let services_data = &mgr
             .gateway_state
             .read()
@@ -318,6 +320,7 @@ impl Manager {
                 }
             }
         }
+        timer.observe_duration();
         Ok(())
     }
 
@@ -1083,6 +1086,9 @@ impl Manager {
         opts: protocol::ctl::SvcLoad,
     ) -> NetResult<()> {
         SVC_LOAD_COUNTER.inc();
+        let timer = SVC_LOAD_HISTOGRAM
+            .with_label_values(&["svc_load"])
+            .start_timer();
         let ident: PackageIdent = opts.ident.clone().ok_or(err_update_client())?.into();
         let bldr_url = opts
             .bldr_url
@@ -1267,7 +1273,9 @@ impl Manager {
                 }
             }
         }
+
         req.reply_complete(net::ok());
+        timer.observe_duration();
         Ok(())
     }
 
@@ -1276,6 +1284,10 @@ impl Manager {
         req: &mut CtlRequest,
         opts: protocol::ctl::SvcUnload,
     ) -> NetResult<()> {
+        SVC_UNLOAD_COUNTER.inc();
+        let timer = SVC_UNLOAD_HISTOGRAM
+            .with_label_values(&["svc_unload"])
+            .start_timer();
         let ident: PackageIdent = opts.ident.ok_or(err_update_client())?.into();
         // Gather up the paths to all the spec files we care about,
         // along with their corresponding idents (we do this to ensure
@@ -1309,6 +1321,7 @@ impl Manager {
             req.info(format!("Unloading {}", ident))?;
         }
         req.reply_complete(net::ok());
+        timer.observe_duration();
         Ok(())
     }
 
@@ -1317,6 +1330,10 @@ impl Manager {
         req: &mut CtlRequest,
         opts: protocol::ctl::SvcStart,
     ) -> NetResult<()> {
+        SVC_START_COUNTER.inc();
+        let timer = SVC_START_HISTOGRAM
+            .with_label_values(&["svc_start"])
+            .start_timer();
         let ident = opts.ident.ok_or(err_update_client())?.into();
         let updated_specs = match Self::existing_specs_for_ident(&mgr.cfg, &ident)? {
             Some(Spec::Service(mut spec)) => {
@@ -1357,6 +1374,7 @@ impl Manager {
             ))?;
         }
         req.reply_complete(net::ok());
+        timer.observe_duration();
         Ok(())
     }
 
@@ -1365,6 +1383,10 @@ impl Manager {
         req: &mut CtlRequest,
         opts: protocol::ctl::SvcStop,
     ) -> NetResult<()> {
+        SVC_STOP_COUNTER.inc();
+        let timer = SVC_STOP_HISTOGRAM
+            .with_label_values(&["svc_stop"])
+            .start_timer();
         let ident: PackageIdent = opts.ident.ok_or(err_update_client())?.into();
         let updated_specs = match Self::existing_specs_for_ident(&mgr.cfg, &ident)? {
             Some(Spec::Service(mut spec)) => {
@@ -1405,6 +1427,7 @@ impl Manager {
             ))?;
         }
         req.reply_complete(net::ok());
+        timer.observe_duration();
         Ok(())
     }
 
