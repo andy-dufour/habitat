@@ -33,7 +33,7 @@ use actix_web::{
 };
 use crypto;
 use hcore::{env as henv, service::ServiceGroup};
-use prometheus::{self, Encoder, TextEncoder};
+use prometheus::{self, Counter, Encoder, HistogramVec, TextEncoder};
 use protocol::socket_addr_env_or_default;
 use rustls::ServerConfig;
 use serde_json::{self, Value as Json};
@@ -55,6 +55,8 @@ pub const DEFAULT_PORT: u16 = 9631;
 
 /// Default environment variable override for HTTPGateway listener address.
 pub const DEFAULT_ADDRESS_ENVVAR: &'static str = "HAB_LISTEN_HTTP";
+
+include!("metrics/http.rs");
 
 #[derive(PartialEq, Eq, Debug, Clone)]
 pub struct ListenAddr(SocketAddr);
@@ -307,32 +309,53 @@ fn json_response(data: String) -> HttpResponse {
 
 // Begin route handlers
 fn butterfly(req: &HttpRequest<AppState>) -> HttpResponse {
+    HTTP_BUTTERFLY_COUNTER.inc();
+    let timer = HTTP_BUTTERFLY_HISTOGRAM
+        .with_label_values(&["butterfly"])
+        .start_timer();
+
     let data = &req
         .state()
         .gateway_state
         .read()
         .expect("GatewayState lock is poisoned")
         .butterfly_data;
+
+    timer.observe_duration();
     json_response(data.to_string())
 }
 
 fn census(req: &HttpRequest<AppState>) -> HttpResponse {
+    HTTP_CENSUS_COUNTER.inc();
+    let timer = HTTP_CENSUS_HISTOGRAM
+        .with_label_values(&["census"])
+        .start_timer();
+
     let data = &req
         .state()
         .gateway_state
         .read()
         .expect("GatewayState lock is poisoned")
         .census_data;
+
+    timer.observe_duration();
     json_response(data.to_string())
 }
 
 fn services(req: &HttpRequest<AppState>) -> HttpResponse {
+    HTTP_SERVICES_COUNTER.inc();
+    let timer = HTTP_SERVICES_HISTOGRAM
+        .with_label_values(&["services"])
+        .start_timer();
+
     let data = &req
         .state()
         .gateway_state
         .read()
         .expect("GatewayState lock is poisoned")
         .services_data;
+
+    timer.observe_duration();
     json_response(data.to_string())
 }
 
@@ -358,6 +381,11 @@ fn config(
     group: String,
     org: Option<&str>,
 ) -> HttpResponse {
+    HTTP_CONFIG_COUNTER.inc();
+    let timer = HTTP_CONFIG_HISTOGRAM
+        .with_label_values(&["config"])
+        .start_timer();
+
     let data = &req
         .state()
         .gateway_state
@@ -368,7 +396,10 @@ fn config(
         Ok(sg) => sg,
         Err(_) => return HttpResponse::BadRequest().finish(),
     };
-    match service_from_services(&service_group, &data) {
+    let service = service_from_services(&service_group, &data);
+    timer.observe_duration();
+
+    match service {
         Some(mut s) => HttpResponse::Ok().json(s["cfg"].take()),
         None => HttpResponse::NotFound().finish(),
     }
@@ -394,6 +425,11 @@ fn health(
     group: String,
     org: Option<&str>,
 ) -> HttpResponse {
+    HTTP_HEALTH_COUNTER.inc();
+    let timer = HTTP_HEALTH_HISTOGRAM
+        .with_label_values(&["health"])
+        .start_timer();
+
     let service_group = match ServiceGroup::new(None, svc, group, org) {
         Ok(sg) => sg,
         Err(_) => return HttpResponse::BadRequest().finish(),
@@ -420,12 +456,14 @@ fn health(
             let _ = file.read_to_string(&mut body.stderr);
         }
 
+        timer.observe_duration();
         HttpResponse::build(http_status).json(&body)
     } else {
         debug!(
             "Didn't find any health data for service group {:?}",
             &service_group
         );
+        timer.observe_duration();
         HttpResponse::NotFound().finish()
     }
 }
@@ -450,6 +488,11 @@ fn service(
     group: String,
     org: Option<&str>,
 ) -> HttpResponse {
+    HTTP_SERVICE_COUNTER.inc();
+    let timer = HTTP_SERVICE_HISTOGRAM
+        .with_label_values(&["service"])
+        .start_timer();
+
     let data = &req
         .state()
         .gateway_state
@@ -460,25 +503,48 @@ fn service(
         Ok(sg) => sg,
         Err(_) => return HttpResponse::BadRequest().finish(),
     };
-    match service_from_services(&service_group, &data) {
+    let service = service_from_services(&service_group, &data);
+    timer.observe_duration();
+
+    match service {
         Some(s) => HttpResponse::Ok().json(s),
         None => HttpResponse::NotFound().finish(),
     }
 }
 
 fn metrics(_req: &HttpRequest<AppState>) -> HttpResponse {
+    HTTP_METRICS_COUNTER.inc();
+    let timer = HTTP_METRICS_HISTOGRAM
+        .with_label_values(&["metrics"])
+        .start_timer();
+
     let encoder = TextEncoder::new();
     let metric_families = prometheus::gather();
     let mut buffer = vec![];
 
-    // JB TODO: handle both of these unwraps
-    encoder.encode(&metric_families, &mut buffer).unwrap();
+    if let Err(e) = encoder.encode(&metric_families, &mut buffer) {
+        error!("Error encoding metrics: {:?}", e);
+    }
+
+    let resp = match String::from_utf8(buffer) {
+        Ok(s) => s,
+        Err(e) => {
+            error!("Error constructing string from metrics buffer: {:?}", e);
+            String::from("")
+        }
+    };
+
+    timer.observe_duration();
     HttpResponse::Ok()
         .content_type(encoder.format_type())
-        .body(String::from_utf8(buffer).unwrap())
+        .body(resp)
 }
 
 fn doc(_req: &HttpRequest<AppState>) -> HttpResponse {
+    HTTP_DOC_COUNTER.inc();
+    let timer = HTTP_DOC_HISTOGRAM.with_label_values(&["doc"]).start_timer();
+
+    timer.observe_duration();
     HttpResponse::Ok().content_type("text/html").body(APIDOCS)
 }
 // End route handlers
