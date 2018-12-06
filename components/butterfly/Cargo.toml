@@ -18,6 +18,7 @@ env_logger = "*"
 habitat_core = { git = "https://github.com/habitat-sh/core.git" }
 log = "*"
 lazy_static = "*"
+prometheus = "*"
 prost = "*"
 prost-derive = "*"
 rand = "*"

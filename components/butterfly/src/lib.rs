@@ -50,6 +50,8 @@ extern crate habitat_core;
 extern crate lazy_static;
 #[macro_use]
 extern crate log;
+#[macro_use]
+extern crate prometheus;
 extern crate prost;
 #[macro_use]
 extern crate prost_derive;

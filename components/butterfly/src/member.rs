@@ -26,6 +26,7 @@ use std::str::FromStr;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, RwLock};
 
+use prometheus::Gauge;
 use rand::{seq::SliceRandom, thread_rng};
 use serde::{
     de,
@@ -42,6 +43,29 @@ use rumor::{RumorKey, RumorPayload, RumorType};
 
 /// How many nodes do we target when we need to run PingReq.
 const PINGREQ_TARGETS: usize = 5;
+
+lazy_static! {
+    static ref BF_PEER_ALIVE_GAUGE: Gauge = register_gauge!(opts!(
+        "butterfly_peer_health_count",
+        "Number of butterfly peers",
+        labels!{"health" => "alive",}
+    )).unwrap();
+    static ref BF_PEER_SUSPECT_GAUGE: Gauge = register_gauge!(opts!(
+        "butterfly_peer_health_count",
+        "Number of butterfly peers",
+        labels!{"health" => "suspect",}
+    )).unwrap();
+    static ref BF_PEER_CONFIRMED_GAUGE: Gauge = register_gauge!(opts!(
+        "butterfly_peer_health_count",
+        "Number of butterfly peers",
+        labels!{"health" => "confirmed",}
+    )).unwrap();
+    static ref BF_PEER_DEPARTED_GAUGE: Gauge = register_gauge!(opts!(
+        "butterfly_peer_health_count",
+        "Number of butterfly peers",
+        labels!{"health" => "departed",}
+    )).unwrap();
+}
 
 /// Wraps a `u64` to represent the "incarnation number" of a
 /// `Member`. Incarnation numbers can only ever be incremented.
@@ -607,7 +631,29 @@ impl MemberList {
             .insert(String::from(member_id), health);
 
         self.increment_update_counter();
+        self.calculate_peer_health_metrics();
         true
+    }
+
+    fn calculate_peer_health_metrics(&self) {
+        let health_map = self.health.read().expect("Health lock is poisoned");
+        let health_count = health_map.values().filter(|h| **h == Health::Alive).count();
+        BF_PEER_ALIVE_GAUGE.set(health_count as f64);
+        let health_count = health_map
+            .values()
+            .filter(|h| **h == Health::Suspect)
+            .count();
+        BF_PEER_SUSPECT_GAUGE.set(health_count as f64);
+        let health_count = health_map
+            .values()
+            .filter(|h| **h == Health::Confirmed)
+            .count();
+        BF_PEER_CONFIRMED_GAUGE.set(health_count as f64);
+        let health_count = health_map
+            .values()
+            .filter(|h| **h == Health::Departed)
+            .count();
+        BF_PEER_DEPARTED_GAUGE.set(health_count as f64);
     }
 
     /// Returns the health of the member, if the member exists.
