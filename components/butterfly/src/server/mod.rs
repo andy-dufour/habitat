@@ -42,6 +42,7 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 use habitat_core::crypto::SymKey;
+use prometheus::Gauge;
 use serde::ser::SerializeStruct;
 use serde::{Serialize, Serializer};
 
@@ -63,6 +64,13 @@ use trace::{Trace, TraceKind};
 /// The maximum number of other members we should notify when we shut
 /// down and leave the ring.
 const SELF_DEPARTURE_RUMOR_FANOUT: usize = 10;
+
+lazy_static! {
+    static ref BF_INCARNATION_GAUGE: Gauge = register_gauge!(opts!(
+        "butterfly_incarnation_number",
+        "Incarnation number of the supervisor"
+    )).unwrap();
+}
 
 type AckReceiver = mpsc::Receiver<(SocketAddr, Ack)>;
 type AckSender = mpsc::Sender<(SocketAddr, Ack)>;
@@ -111,6 +119,7 @@ impl Myself {
             Some(ref mut s) => {
                 let value = s.load()?;
                 self.member.incarnation = value;
+                BF_INCARNATION_GAUGE.set(value.to_u64() as f64);
             }
             None => {
                 // Can't sync unless you've got a store!
@@ -170,6 +179,7 @@ impl Myself {
     /// that.
     fn refute_incarnation(&mut self, incoming: Incarnation) {
         self.member.incarnation = incoming + 1;
+        BF_INCARNATION_GAUGE.set(self.member.incarnation.to_u64() as f64);
         if let Some(ref mut s) = self.incarnation_store {
             if let Err(e) = s.store(self.member.incarnation) {
                 error!(
